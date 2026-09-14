@@ -30,6 +30,11 @@ export const SERVER = {
   /** Acknowledges every later session.update. */
   sessionUpdated: "session.updated",
 
+  /** The server's VAD heard you start talking. The barge-in trigger. */
+  speechStarted: "input_audio_buffer.speech_started",
+  /** The server's VAD heard you stop. A turn is about to be created. */
+  speechStopped: "input_audio_buffer.speech_stopped",
+
   /** A new assistant turn has begun. */
   responseCreated: "response.created",
   /** An item (assistant message, tool call) was added to the response. */
@@ -140,4 +145,32 @@ export function userTextItem(text: string): ClientEvent {
  */
 export function responseCreate(): ClientEvent {
   return { type: "response.create" };
+}
+
+/**
+ * Stream one chunk of microphone audio: base64-encoded PCM16 at the session's
+ * input rate. We send roughly one of these every 100 ms.
+ *
+ * There is no "commit" to send afterwards — with turn detection enabled the
+ * server decides where your turn ends. (Set `turn_detection: null` and you take
+ * that job back, using `input_audio_buffer.commit` to mark the end yourself.)
+ */
+export function inputAudioAppend(base64: string): ClientEvent {
+  return { type: "input_audio_buffer.append", audio: base64 };
+}
+
+/**
+ * Tell the server that only the first `audioEndMs` of an assistant item was
+ * actually heard, and to forget the rest.
+ *
+ * `content_index` identifies which content part of the item to cut; an audio
+ * reply has one, at index 0.
+ */
+export function truncateItem(itemId: string, audioEndMs: number): ClientEvent {
+  return {
+    type: "conversation.item.truncate",
+    item_id: itemId,
+    content_index: 0,
+    audio_end_ms: Math.round(audioEndMs),
+  };
 }

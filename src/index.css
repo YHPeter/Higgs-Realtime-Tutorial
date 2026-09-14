@@ -126,6 +126,54 @@ code {
   padding-left: 0.6rem;
 }
 
+/* --- microphone --- */
+
+.mic {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.mic-on {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.meter {
+  flex: 1;
+  min-width: 8rem;
+  height: 0.55rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--ok);
+  transition: width 80ms linear;
+}
+
+.meter-warn {
+  color: var(--warn);
+  font-size: 0.82rem;
+  flex-basis: 100%;
+}
+
+.typed {
+  margin-bottom: 1rem;
+}
+
+.typed summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 0.7rem;
+}
+
 /* --- transcript preview --- */
 
 .transcript {

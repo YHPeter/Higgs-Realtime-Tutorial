@@ -6,6 +6,7 @@ import {
   type LogEntry,
 } from "./realtime/RealtimeClient";
 import { DebugDrawer } from "./ui/DebugDrawer";
+import { MicButton } from "./ui/MicButton";
 import { StatusBar } from "./ui/StatusBar";
 
 /** Ask our own server for a fresh ephemeral key. One per connection. */
@@ -23,6 +24,9 @@ export default function App() {
   const [closeMessage, setCloseMessage] = useState<string | null>(null);
   const [text, setText] = useState("Hi! Say something short so I can check my speakers.");
   const [transcript, setTranscript] = useState("");
+  const [micActive, setMicActive] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [micError, setMicError] = useState<string | null>(null);
 
   // The client outlives re-renders, so it lives in a ref rather than state.
   const clientRef = useRef<RealtimeClient | null>(null);
@@ -33,12 +37,17 @@ export default function App() {
       onActivity: setActivity,
       onLog: (entry) => setLog((l) => [...l, entry]),
       onClose: (info) => setCloseMessage(info.message),
+      onMicChange: setMicActive,
+      onMicLevel: setMicLevel,
       onServerEvent: (evt) => {
         // A small preview of Part 3: the model's own words, streamed back as
         // text while it speaks. Part 3 turns this into a real transcript.
         if (evt.type === "response.output_audio_transcript.delta") {
           setTranscript((t) => t + (typeof evt.delta === "string" ? evt.delta : ""));
         }
+        // Clear the previous reply when a new turn begins, so what you see on
+        // screen is what is being spoken right now.
+        if (evt.type === "response.created") setTranscript("");
       },
     });
   }
@@ -59,14 +68,27 @@ export default function App() {
     clientRef.current!.sendUserText(text);
   }, [text]);
 
+  const toggleMic = useCallback(async () => {
+    const client = clientRef.current!;
+    setMicError(null);
+    try {
+      if (client.micActive) await client.stopMic();
+      else await client.startMic();
+    } catch (e) {
+      // Denied permission, no input device, or an insecure origin. All three
+      // land here and all three are worth telling the user about explicitly.
+      setMicError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
   const isOpen = connection === "open";
 
   return (
     <main className="app">
       <h1>Higgs Realtime Tutorial</h1>
       <p className="lede">
-        Part 1 — one WebSocket, one typed message, one spoken reply. Open the
-        event log at the bottom to watch the protocol as it happens.
+        Part 2 — talk to it. Connect, start the microphone, and just speak; the
+        server decides when your turn ends. Talk over the reply to interrupt it.
       </p>
 
       <StatusBar connection={connection} activity={activity} closeMessage={closeMessage} />
@@ -80,18 +102,29 @@ export default function App() {
         </button>
       </div>
 
-      <div className="row">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && isOpen && send()}
-          placeholder="Type something for the model to say back…"
-          disabled={!isOpen}
-        />
-        <button onClick={send} disabled={!isOpen}>
-          Send
-        </button>
-      </div>
+      <MicButton
+        active={micActive}
+        level={micLevel}
+        disabled={!isOpen}
+        onToggle={toggleMic}
+      />
+      {micError && <p className="error">{micError}</p>}
+
+      <details className="typed">
+        <summary>…or type instead (Part 1's path, still here)</summary>
+        <div className="row">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && isOpen && send()}
+            placeholder="Type something for the model to say back…"
+            disabled={!isOpen}
+          />
+          <button onClick={send} disabled={!isOpen}>
+            Send
+          </button>
+        </div>
+      </details>
 
       {transcript && (
         <blockquote className="transcript">

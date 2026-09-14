@@ -1,7 +1,9 @@
 import {
   SERVER,
   describeClose,
+  inputAudioAppend,
   responseCreate,
+  truncateItem,
   userTextItem,
   type ClientEvent,
   type CloseInfo,
@@ -9,6 +11,7 @@ import {
 } from "./events";
 import { buildSessionConfig } from "./sessionConfig";
 import { RingPlayer } from "../audio/playback";
+import { MicCapture } from "../audio/capture";
 
 // The model can also be set in session.update; passing it in the URL means the
 // server knows which model you want before the first byte of config arrives.
@@ -17,7 +20,7 @@ const WS_URL = "wss://api.boson.ai/v1/realtime?model=higgs-realtime";
 export type ConnectionState = "idle" | "connecting" | "open" | "closing" | "closed";
 
 /** Coarse state for the status bar. */
-export type Activity = "idle" | "thinking" | "speaking";
+export type Activity = "idle" | "listening" | "thinking" | "speaking";
 
 export interface LogEntry {
   id: number;
@@ -33,6 +36,10 @@ export interface RealtimeCallbacks {
   onLog?: (entry: LogEntry) => void;
   onServerEvent?: (evt: ServerEvent) => void;
   onClose?: (info: CloseInfo) => void;
+  /** Fired when the microphone starts or stops. */
+  onMicChange?: (active: boolean) => void;
+  /** Live microphone level (RMS, ~10 per second) for the meter. */
+  onMicLevel?: (rms: number) => void;
   /** Mints a fresh ephemeral key for each connection. Required. */
   tokenProvider: () => Promise<string>;
 }
@@ -47,7 +54,14 @@ export class RealtimeClient {
   private ws: WebSocket | null = null;
   private state: ConnectionState = "idle";
   private player: RingPlayer;
+  private capture: MicCapture;
   private cb: RealtimeCallbacks;
+
+  /**
+   * The assistant item currently producing audio. This is what we truncate on
+   * barge-in, so we track it from whichever event mentions it first.
+   */
+  private currentAssistantItemId: string | null = null;
 
   /**
    * ⚠ The single most important line in this file.
@@ -69,12 +83,36 @@ export class RealtimeClient {
   constructor(callbacks: RealtimeCallbacks) {
     this.cb = callbacks;
     this.player = new RingPlayer((speaking) => {
-      if (!speaking) this.setActivity("idle");
+      if (!speaking) this.setActivity(this.capture?.active ? "listening" : "idle");
     });
+    this.capture = new MicCapture(
+      (base64) => this.send(inputAudioAppend(base64)),
+      (rms) => this.cb.onMicLevel?.(rms),
+    );
   }
 
   get connectionState(): ConnectionState {
     return this.state;
+  }
+
+  get micActive(): boolean {
+    return this.capture.active;
+  }
+
+  /** Start streaming microphone audio. Throws if permission is denied. */
+  async startMic(): Promise<void> {
+    await this.capture.start();
+    this.cb.onMicChange?.(true);
+    this.setActivity("listening");
+    this.info("Microphone started.");
+  }
+
+  async stopMic(): Promise<void> {
+    await this.capture.stop();
+    this.cb.onMicChange?.(false);
+    this.cb.onMicLevel?.(0);
+    this.setActivity("idle");
+    this.info("Microphone stopped.");
   }
 
   /** Mint a key and open the socket. Safe to call twice; the second is ignored. */
@@ -134,6 +172,7 @@ export class RealtimeClient {
     } else {
       this.setState("closed");
     }
+    void this.capture.stop().then(() => this.cb.onMicChange?.(false));
   }
 
   /** Send a typed message and ask for a reply. */
@@ -156,6 +195,7 @@ export class RealtimeClient {
 
   async close(): Promise<void> {
     this.disconnect();
+    await this.capture.stop();
     await this.player.close();
   }
 
@@ -177,13 +217,34 @@ export class RealtimeClient {
 
     switch (evt.type) {
       case SERVER.responseCreated:
+        // A new assistant turn. Zero the played-sample counter so the truncate
+        // maths below measures into *this* reply, not the whole session.
+        this.player.reset();
         this.setActivity("thinking");
         break;
+
+      case SERVER.speechStarted:
+        // The user started talking over the model. This is the barge-in path.
+        void this.handleBargeIn();
+        break;
+
+      case SERVER.speechStopped:
+        this.setActivity("thinking");
+        break;
+
+      case SERVER.outputItemAdded: {
+        const item = evt.item as { id?: string; type?: string } | undefined;
+        if (item?.type === "message" && typeof item.id === "string") {
+          this.currentAssistantItemId = item.id;
+        }
+        break;
+      }
 
       case SERVER.outputAudioDelta: {
         // The audio itself: base64 PCM16 in `delta`.
         const b64 = evt.delta;
         if (typeof b64 === "string" && b64.length > 0) {
+          if (typeof evt.item_id === "string") this.currentAssistantItemId = evt.item_id;
           this.player.enqueueBase64(b64);
           this.setActivity("speaking");
         }
@@ -202,6 +263,32 @@ export class RealtimeClient {
         // handle. They are already logged. Never throw here.
         break;
     }
+  }
+
+  /**
+   * Barge-in. Two things have to happen, and the second is the one everybody
+   * forgets.
+   *
+   * 1. Stop playing at once. We may be holding several seconds of audio the
+   *    user has not heard yet; without this, the model keeps talking over them.
+   *
+   * 2. Tell the server how much was actually heard. The server has already
+   *    stored the whole reply as a conversation item, so its memory now
+   *    contains words that never reached anyone's ears. Left alone, the model
+   *    will refer back to things it "said" that the user never heard — and
+   *    "sorry, what was that last bit?" gets answered from the wrong text.
+   *
+   * `flush()` resolves with the played-sample count converted to milliseconds,
+   * which is exactly `audio_end_ms`. Note we do NOT send response.create here:
+   * the server's own VAD starts the new user turn.
+   */
+  private async handleBargeIn(): Promise<void> {
+    this.setActivity("listening");
+    const playedMs = await this.player.flush();
+    if (this.currentAssistantItemId && playedMs > 0) {
+      this.send(truncateItem(this.currentAssistantItemId, playedMs));
+    }
+    this.currentAssistantItemId = null;
   }
 
   private setState(s: ConnectionState): void {
