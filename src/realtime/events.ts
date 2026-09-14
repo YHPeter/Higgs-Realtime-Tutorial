@@ -34,6 +34,10 @@ export const SERVER = {
   speechStarted: "input_audio_buffer.speech_started",
   /** The server's VAD heard you stop. A turn is about to be created. */
   speechStopped: "input_audio_buffer.speech_stopped",
+  /** The text of what you said. Arrives well after the turn itself. */
+  transcriptionCompleted: "conversation.item.input_audio_transcription.completed",
+  /** Transcription was attempted and failed — show something, not nothing. */
+  transcriptionFailed: "conversation.item.input_audio_transcription.failed",
 
   /** A new assistant turn has begun. */
   responseCreated: "response.created",

@@ -66,6 +66,17 @@ export function buildSessionConfig(): ClientEvent {
           // them; see the ack discussion in docs/part-2.md before you tune
           // anything.
           turn_detection: { type: "server_vad" },
+          // PART 3: transcribe the user's speech.
+          //
+          // Off by default — the ack shows `model: ""` if you omit this — and
+          // it is what lets you show the user's own words on screen. The model
+          // understands your speech either way; this is purely so *you* can
+          // read it.
+          //
+          // The model name is validated at session.update time: a name the
+          // endpoint does not serve fails the update with an error naming it.
+          // As of this writing, "higgs-stt-3.1" is the one to use.
+          transcription: { model: "higgs-stt-3.1", language: "en" },
         },
         output: {
           format: { type: "audio/pcm", rate: AUDIO_RATE },

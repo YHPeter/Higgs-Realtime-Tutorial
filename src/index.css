@@ -174,25 +174,112 @@ code {
   margin-bottom: 0.7rem;
 }
 
-/* --- transcript preview --- */
+/* --- transcript --- */
 
-.transcript {
-  margin: 1.2rem 0 0;
-  padding: 0.9rem 1.1rem;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 0.4rem;
-  line-height: 1.6;
+.empty {
+  color: var(--muted);
+  padding: 1.5rem 0;
 }
 
-.transcript .label {
-  display: block;
+.transcript-panel {
+  margin-top: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.transcript-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
-  margin-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+
+.link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.turn {
+  padding: 0.7rem 1rem;
+  border-radius: 0.5rem;
+  line-height: 1.6;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.turn .who {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+
+.turn.user {
+  border-left: 3px solid var(--muted);
+}
+
+.turn.assistant {
+  border-left: 3px solid var(--accent);
+}
+
+.turn.assistant.interrupted {
+  border-left-color: var(--warn);
+}
+
+.turn.system {
+  background: none;
+  border: none;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+  padding: 0.2rem;
+}
+
+.pending {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  background: var(--warn);
+  color: #14161a;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  vertical-align: middle;
+}
+
+.caret {
+  display: inline-block;
+  width: 0.5rem;
+  height: 1em;
+  margin-left: 0.15rem;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
 }
 
 /* --- debug drawer --- */

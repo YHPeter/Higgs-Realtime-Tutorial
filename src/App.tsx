@@ -5,9 +5,15 @@ import {
   type ConnectionState,
   type LogEntry,
 } from "./realtime/RealtimeClient";
+import {
+  emptyTranscript,
+  transcriptReducer,
+  type TranscriptState,
+} from "./state/transcriptStore";
 import { DebugDrawer } from "./ui/DebugDrawer";
 import { MicButton } from "./ui/MicButton";
 import { StatusBar } from "./ui/StatusBar";
+import { TranscriptPanel } from "./ui/TranscriptPanel";
 
 /** Ask our own server for a fresh ephemeral key. One per connection. */
 async function fetchToken(): Promise<string> {
@@ -23,7 +29,7 @@ export default function App() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [closeMessage, setCloseMessage] = useState<string | null>(null);
   const [text, setText] = useState("Hi! Say something short so I can check my speakers.");
-  const [transcript, setTranscript] = useState("");
+  const [transcript, setTranscript] = useState<TranscriptState>(emptyTranscript);
   const [micActive, setMicActive] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
@@ -39,15 +45,11 @@ export default function App() {
       onClose: (info) => setCloseMessage(info.message),
       onMicChange: setMicActive,
       onMicLevel: setMicLevel,
+      // Every server event goes through the reducer. That is the whole wiring:
+      // the client knows nothing about the transcript, and the transcript knows
+      // nothing about sockets.
       onServerEvent: (evt) => {
-        // A small preview of Part 3: the model's own words, streamed back as
-        // text while it speaks. Part 3 turns this into a real transcript.
-        if (evt.type === "response.output_audio_transcript.delta") {
-          setTranscript((t) => t + (typeof evt.delta === "string" ? evt.delta : ""));
-        }
-        // Clear the previous reply when a new turn begins, so what you see on
-        // screen is what is being spoken right now.
-        if (evt.type === "response.created") setTranscript("");
+        setTranscript((s) => transcriptReducer(s, evt, Date.now()));
       },
     });
   }
@@ -64,7 +66,6 @@ export default function App() {
 
   const send = useCallback(() => {
     if (!text.trim()) return;
-    setTranscript("");
     clientRef.current!.sendUserText(text);
   }, [text]);
 
@@ -87,8 +88,8 @@ export default function App() {
     <main className="app">
       <h1>Higgs Realtime Tutorial</h1>
       <p className="lede">
-        Part 2 — talk to it. Connect, start the microphone, and just speak; the
-        server decides when your turn ends. Talk over the reply to interrupt it.
+        Part 3 — the conversation, as a transcript. Both sides render in order
+        even though the events arrive out of order.
       </p>
 
       <StatusBar connection={connection} activity={activity} closeMessage={closeMessage} />
@@ -126,12 +127,7 @@ export default function App() {
         </div>
       </details>
 
-      {transcript && (
-        <blockquote className="transcript">
-          <span className="label">the model said</span>
-          {transcript}
-        </blockquote>
-      )}
+      <TranscriptPanel state={transcript} />
 
       <DebugDrawer entries={log} />
     </main>
