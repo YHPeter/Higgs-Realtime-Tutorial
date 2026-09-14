@@ -43,6 +43,24 @@ function TurnBubble({ item }: { item: TranscriptItem }) {
     return <div className="turn system">— {item.text} —</div>;
   }
 
+  if (item.kind === "tool") {
+    const summary =
+      item.result && typeof item.result === "object" && "summary" in item.result
+        ? String((item.result as { summary: unknown }).summary)
+        : null;
+    return (
+      <div className={`turn tool ${item.status}`}>
+        <span className="who">
+          {item.name}
+          {item.ms != null && <span className="ms"> {item.ms}ms</span>}
+        </span>
+        <code className="args">{item.args ? JSON.stringify(item.args) : "…"}</code>
+        {item.status === "running" && <span className="pending"> running…</span>}
+        {summary && <div className="tool-result">{summary}</div>}
+      </div>
+    );
+  }
+
   if (item.kind === "user") {
     return (
       <div className="turn user">

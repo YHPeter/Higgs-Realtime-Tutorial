@@ -88,8 +88,9 @@ export default function App() {
     <main className="app">
       <h1>Higgs Realtime Tutorial</h1>
       <p className="lede">
-        Part 3 — the conversation, as a transcript. Both sides render in order
-        even though the events arrive out of order.
+        The finished app. Ask about something it could not know — the weekend
+        weather in Willow Creek, say — and it will search for it and speak what
+        it found.
       </p>
 
       <StatusBar connection={connection} activity={activity} closeMessage={closeMessage} />

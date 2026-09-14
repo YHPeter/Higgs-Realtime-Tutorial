@@ -1,6 +1,7 @@
 import {
   SERVER,
   describeClose,
+  functionCallOutput,
   inputAudioAppend,
   responseCreate,
   truncateItem,
@@ -12,6 +13,8 @@ import {
 import { buildSessionConfig } from "./sessionConfig";
 import { RingPlayer } from "../audio/playback";
 import { MicCapture } from "../audio/capture";
+import { dispatch as dispatchTool } from "../tools/registry";
+import { CLIENT_TOOL_RESULT } from "../state/transcriptStore";
 
 // The model can also be set in session.update; passing it in the URL means the
 // server knows which model you want before the first byte of config arrives.
@@ -62,6 +65,25 @@ export class RealtimeClient {
    * barge-in, so we track it from whichever event mentions it first.
    */
   private currentAssistantItemId: string | null = null;
+
+  /**
+   * Every call_id we have already started running.
+   *
+   * Tool calls can be announced twice — once by
+   * response.function_call_arguments.done and again in response.done's output
+   * list. Without this Set you execute each one twice, which for a search is
+   * merely wasteful and for anything that writes is a real bug.
+   */
+  private handledCallIds = new Set<string>();
+
+  /**
+   * Tool calls belonging to the response currently being generated.
+   *
+   * The model can request several at once. Each result must come back as its
+   * own function_call_output, but there must be exactly ONE response.create
+   * afterwards — so the batch is collected here and flushed together.
+   */
+  private toolBatch: { promises: Promise<void>[]; outputs: ClientEvent[] } | null = null;
 
   /**
    * ⚠ The single most important line in this file.
@@ -220,7 +242,16 @@ export class RealtimeClient {
         // A new assistant turn. Zero the played-sample counter so the truncate
         // maths below measures into *this* reply, not the whole session.
         this.player.reset();
+        this.toolBatch = null;
         this.setActivity("thinking");
+        break;
+
+      case SERVER.functionCallArgsDone:
+        this.onFunctionCallArgsDone(evt);
+        break;
+
+      case SERVER.responseDone:
+        this.onResponseDone(evt);
         break;
 
       case SERVER.speechStarted:
@@ -263,6 +294,120 @@ export class RealtimeClient {
         // handle. They are already logged. Never throw here.
         break;
     }
+  }
+
+  // --- the tool loop ---------------------------------------------------------
+
+  /**
+   * The model has finished dictating a tool call's arguments. Start running it
+   * immediately rather than waiting for response.done — the sooner it starts,
+   * the sooner the model can speak the answer.
+   */
+  private onFunctionCallArgsDone(evt: ServerEvent): void {
+    const callId = typeof evt.call_id === "string" ? evt.call_id : undefined;
+    const name = typeof evt.name === "string" ? evt.name : undefined;
+    if (!callId || !name) return;
+
+    let args: Record<string, unknown> = {};
+    const raw = typeof evt.arguments === "string" ? evt.arguments : undefined;
+    try {
+      if (raw) args = JSON.parse(raw);
+    } catch {
+      // Malformed arguments are the model's mistake, not a reason to crash.
+      // Run the tool with nothing and let it return its own complaint.
+      this.info(`could not parse arguments for ${name}: ${raw}`);
+    }
+    this.startToolCall(callId, name, args);
+  }
+
+  private startToolCall(callId: string, name: string, args: Record<string, unknown>): void {
+    // ⚠ The guard that stops the double-fire. See onResponseDone.
+    if (this.handledCallIds.has(callId)) return;
+    this.handledCallIds.add(callId);
+
+    if (!this.toolBatch) this.toolBatch = { promises: [], outputs: [] };
+    const batch = this.toolBatch;
+    const startedAt = Date.now();
+
+    const p = (async () => {
+      let result: unknown;
+      try {
+        result = await dispatchTool(name, args);
+      } catch (e) {
+        // A thrown handler must still produce an output, or the model waits
+        // forever for a call_id that never comes back.
+        this.info(`tool ${name} threw: ${e instanceof Error ? e.message : String(e)}`);
+        result = { summary: "That lookup failed.", error: "tool_failed" };
+      }
+      // Feed the result into the transcript through the same reducer path as
+      // everything else, using a synthetic event type of our own.
+      this.cb.onServerEvent?.({
+        type: CLIENT_TOOL_RESULT,
+        call_id: callId,
+        result,
+        ms: Date.now() - startedAt,
+      });
+      batch.outputs.push(functionCallOutput(callId, JSON.stringify(result)));
+    })();
+
+    batch.promises.push(p);
+  }
+
+  /**
+   * The turn is over. If it contained tool calls, this is where we answer them.
+   */
+  private onResponseDone(evt: ServerEvent): void {
+    // ⚠ The double-fire. Tool calls that already arrived via
+    // function_call_arguments.done can appear AGAIN in response.done's output
+    // list. We still walk it — occasionally a call shows up only here — but
+    // handledCallIds means nothing runs twice.
+    const output = (evt.response as { output?: unknown[] } | undefined)?.output ?? [];
+    for (const raw of output) {
+      const item = raw as { type?: string; name?: string; call_id?: string; arguments?: string };
+      if (item?.type === "function_call" && item.call_id && item.name) {
+        let args: Record<string, unknown> = {};
+        try {
+          if (item.arguments) args = JSON.parse(item.arguments);
+        } catch {
+          /* handled above */
+        }
+        this.startToolCall(item.call_id, item.name, args);
+      }
+    }
+
+    if (this.toolBatch && this.toolBatch.promises.length > 0) {
+      void this.flushToolBatch();
+    } else {
+      this.setActivity(this.capture.active ? "listening" : "idle");
+    }
+  }
+
+  /**
+   * Wait for every tool in this turn, send one output per call_id, then exactly
+   * one response.create.
+   *
+   * Both halves of that matter. Miss an output and the model hangs waiting for
+   * a call_id it never hears back about. Send response.create per tool instead
+   * of once, and you get two replies talking over each other.
+   */
+  private async flushToolBatch(): Promise<void> {
+    const batch = this.toolBatch;
+    this.toolBatch = null;
+    if (!batch || batch.promises.length === 0) return;
+
+    if (batch.promises.length > 1) {
+      this.info(`${batch.promises.length} tool calls in one turn — running them in parallel`);
+    }
+    this.setActivity("thinking");
+
+    // Promise.all, not a loop with await: two independent lookups should take
+    // as long as the slower one, not as long as both.
+    await Promise.all(batch.promises);
+
+    for (const out of batch.outputs) this.send(out);
+
+    // Mandatory. Without it the model has every result and says nothing.
+    this.send(responseCreate());
   }
 
   /**

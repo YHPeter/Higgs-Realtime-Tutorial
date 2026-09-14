@@ -54,6 +54,9 @@ export const SERVER = {
   audioTranscriptDelta: "response.output_audio_transcript.delta",
   audioTranscriptDone: "response.output_audio_transcript.done",
 
+  /** The model wants to call a tool; the arguments are complete. */
+  functionCallArgsDone: "response.function_call_arguments.done",
+
   /** Something went wrong. Always read these — they explain rejected config. */
   error: "error",
 
@@ -161,6 +164,20 @@ export function responseCreate(): ClientEvent {
  */
 export function inputAudioAppend(base64: string): ClientEvent {
   return { type: "input_audio_buffer.append", audio: base64 };
+}
+
+/**
+ * Hand a tool's result back to the model.
+ *
+ * `output` is a STRING, even though what you are returning is structured — so
+ * it needs JSON.stringify, and a plain object here silently produces
+ * "[object Object]".
+ */
+export function functionCallOutput(callId: string, output: string): ClientEvent {
+  return {
+    type: "conversation.item.create",
+    item: { type: "function_call_output", call_id: callId, output },
+  };
 }
 
 /**

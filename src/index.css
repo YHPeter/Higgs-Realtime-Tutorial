@@ -239,6 +239,32 @@ code {
   border-left-color: var(--warn);
 }
 
+.turn.tool {
+  border-left: 3px solid var(--muted);
+  font-size: 0.85rem;
+}
+
+.turn.tool.error {
+  border-left-color: var(--error);
+}
+
+.turn.tool .ms {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.args {
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.tool-result {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+
 .turn.system {
   background: none;
   border: none;

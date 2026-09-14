@@ -36,10 +36,12 @@ import dotenv from "dotenv";
 import { buildSessionConfig, AUDIO_RATE } from "../src/realtime/sessionConfig";
 import {
   describeClose,
+  functionCallOutput,
   inputAudioAppend,
   responseCreate,
   userTextItem,
 } from "../src/realtime/events";
+import { dispatch as dispatchTool } from "../src/tools/registry";
 
 dotenv.config();
 
@@ -225,6 +227,17 @@ async function main() {
   // cannot answer.
   let responsesCreated = 0;
   let responsesDone = 0;
+  const handledCallIds = new Set<string>();
+  /**
+   * How many extra response.done events to expect because we answered a tool
+   * call and asked for another reply.
+   *
+   * Counting *responses* rather than in-flight dispatches matters: a tool here
+   * finishes in under a millisecond, so any "is a tool still running" flag is
+   * already false by the time the tool turn's response.done arrives over the
+   * network, and the probe would stop one reply too early.
+   */
+  let extraResponsesExpected = 0;
 
   const ws = new WebSocket(WS_URL, ["realtime", `bai-client-secret.${key}`]);
   const send = (evt: unknown) => ws.send(JSON.stringify(evt));
@@ -256,8 +269,43 @@ async function main() {
       sessionReady();
     }
     if (evt.type === "response.created") responsesCreated++;
+
+    // Run tools, the same way the browser does — same registry, same
+    // handled-call_id guard. Without this the probe would stop at the tool
+    // call and never see the answer the model gives afterwards.
+    if (evt.type === "response.function_call_arguments.done") {
+      const callId = String(evt.call_id ?? "");
+      const name = String(evt.name ?? "");
+      if (callId && name && !handledCallIds.has(callId)) {
+        handledCallIds.add(callId);
+        extraResponsesExpected++;
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(String(evt.arguments ?? "{}"));
+        } catch {
+          /* run it empty and let the handler complain */
+        }
+        void (async () => {
+          const result = await dispatchTool(name, args);
+          console.log(`        ↳ ${name} -> ${result.summary}`);
+          send(functionCallOutput(callId, JSON.stringify(result)));
+          send(responseCreate());
+        })();
+      }
+    }
+
     if (evt.type === "response.done") {
       responsesDone++;
+      // A turn that only asked for a tool is not the turn we are waiting for —
+      // the real answer comes in the response that follows the tool result.
+      //
+      // Note we cannot detect that from response.done itself: verified
+      // 2026-08-07, its `output` array lists only the spoken message, NOT the
+      // function_call. So we count dispatches instead.
+      if (extraResponsesExpected > 0) {
+        extraResponsesExpected--;
+        return;
+      }
       responseDone?.();
       responseDone = null;
     }

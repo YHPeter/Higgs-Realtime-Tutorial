@@ -24,7 +24,18 @@ import { SERVER, type ServerEvent } from "../realtime/events";
 // no clock of its own. That is what makes it testable: feed it a recorded event
 // stream and assert the result. See test/transcriptStore.test.ts.
 
+/**
+ * PART 4 — a synthetic event type of our own.
+ *
+ * A tool result is not a server event; we produced it locally. But it belongs
+ * in the transcript alongside everything else, so rather than bolting on a
+ * second update path, the client emits it through `onServerEvent` with this
+ * type and the reducer treats it like any other event.
+ */
+export const CLIENT_TOOL_RESULT = "client.tool_result";
+
 export type TurnStatus = "pending" | "streaming" | "complete" | "interrupted";
+export type ToolStatus = "running" | "ok" | "error";
 
 export interface UserItem {
   kind: "user";
@@ -50,7 +61,20 @@ export interface SystemItem {
   at: number;
 }
 
-export type TranscriptItem = UserItem | AssistantItem | SystemItem;
+/** PART 4: a tool call, from request through to result. */
+export interface ToolItem {
+  kind: "tool";
+  itemId: string;
+  callId: string;
+  name: string;
+  args: unknown;
+  result: unknown | null;
+  status: ToolStatus;
+  ms: number | null;
+  at: number;
+}
+
+export type TranscriptItem = UserItem | AssistantItem | SystemItem | ToolItem;
 
 export interface TranscriptState {
   order: string[];
@@ -116,6 +140,25 @@ function markStreamingInterrupted(state: TranscriptState): TranscriptState {
     }
   }
   return changed ? { order: state.order, items } : state;
+}
+
+/** Tool items are addressed by call_id, which is not their item id. */
+function findToolByCallId(state: TranscriptState, callId: string): ToolItem | undefined {
+  for (const id of state.order) {
+    const it = state.items[id];
+    if (it.kind === "tool" && it.callId === callId) return it;
+  }
+  return undefined;
+}
+
+function updateToolByCallId(
+  state: TranscriptState,
+  callId: string,
+  fn: (item: ToolItem) => ToolItem,
+): TranscriptState {
+  const found = findToolByCallId(state, callId);
+  if (!found) return state;
+  return updateItem(state, found.itemId, (it) => (it.kind === "tool" ? fn(it) : it));
 }
 
 function addSystem(state: TranscriptState, text: string, now: number): TranscriptState {
@@ -186,7 +229,9 @@ export function transcriptReducer(
     }
 
     case SERVER.outputItemAdded: {
-      const item = evt.item as { id?: string; type?: string; role?: string } | undefined;
+      const item = evt.item as
+        | { id?: string; type?: string; role?: string; name?: string; call_id?: string }
+        | undefined;
       if (!item?.id) return state;
       if (item.type === "message" && item.role === "assistant") {
         return addItem(
@@ -195,7 +240,71 @@ export function transcriptReducer(
           prevId,
         );
       }
+      // PART 4: a tool call is an output item too.
+      if (item.type === "function_call" && item.name && item.call_id) {
+        return addItem(
+          state,
+          {
+            kind: "tool",
+            itemId: item.id,
+            callId: item.call_id,
+            name: item.name,
+            args: null,
+            result: null,
+            status: "running",
+            ms: null,
+            at: now,
+          },
+          prevId,
+        );
+      }
       return state;
+    }
+
+    case SERVER.functionCallArgsDone: {
+      const callId = str(evt.call_id);
+      if (!callId) return state;
+      let args: unknown;
+      const raw = str(evt.arguments);
+      try {
+        args = raw !== undefined ? JSON.parse(raw) : undefined;
+      } catch {
+        args = raw; // show the malformed string rather than dropping it
+      }
+
+      // Create on demand: it is not guaranteed that output_item.added arrived
+      // first, and this event carries everything needed to build the item.
+      const existing = findToolByCallId(state, callId);
+      const name = str(evt.name);
+      if (!existing && name) {
+        return addItem(state, {
+          kind: "tool",
+          itemId: str(evt.item_id) ?? callId,
+          callId,
+          name,
+          args: args ?? null,
+          result: null,
+          status: "running",
+          ms: null,
+          at: now,
+        });
+      }
+      return updateToolByCallId(state, callId, (t) => ({ ...t, args }));
+    }
+
+    case CLIENT_TOOL_RESULT: {
+      const callId = str(evt.call_id);
+      if (!callId) return state;
+      const result = evt.result ?? null;
+      const obj = result !== null && typeof result === "object" ? (result as Record<string, unknown>) : null;
+      const status: ToolStatus = obj && "error" in obj ? "error" : "ok";
+
+      return updateToolByCallId(state, callId, (t) => ({
+        ...t,
+        result,
+        status,
+        ms: typeof evt.ms === "number" ? evt.ms : null,
+      }));
     }
 
     case SERVER.audioTranscriptDelta: {
@@ -271,6 +380,11 @@ export function toPlainText(state: TranscriptState): string {
           return `[${t}] You: ${it.text ?? "(transcribing…)"}`;
         case "assistant":
           return `[${t}] Assistant: ${it.text}${it.status === "interrupted" ? " — interrupted" : ""}`;
+        case "tool": {
+          const args = it.args !== null ? JSON.stringify(it.args) : "";
+          const res = it.result !== null ? ` -> ${JSON.stringify(it.result)}` : "";
+          return `[${t}] · ${it.name}(${args}) [${it.status}${it.ms != null ? `, ${it.ms}ms` : ""}]${res}`;
+        }
         case "system":
           return `[${t}] — ${it.text} —`;
       }

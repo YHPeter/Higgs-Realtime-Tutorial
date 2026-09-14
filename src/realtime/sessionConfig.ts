@@ -1,4 +1,5 @@
 import type { ClientEvent } from "./events";
+import { TOOL_DEFINITIONS } from "../tools/definitions";
 
 /**
  * The first thing we send after the socket opens.
@@ -20,9 +21,21 @@ import type { ClientEvent } from "./events";
 // tools at all. Guidance about a specific tool belongs in that tool's
 // description, not here.
 export const SYSTEM_PROMPT = [
-  "You are a friendly voice assistant being used to test a browser audio pipeline.",
-  "Keep every reply to one or two short sentences.",
-  "You are speaking aloud, not writing — no lists, no markdown, no emoji.",
+  // Role and capabilities.
+  "You are a friendly voice assistant with one tool: a web search.",
+  // Speaking style.
+  "Keep every reply to one or two short sentences, matching the user's energy.",
+  "You are speaking aloud, not writing — no lists, no markdown, no emoji, no URLs.",
+  // Turn-taking.
+  "A short follow-up question is fine; do not interrogate, and do not add",
+  "detail the user did not ask for.",
+  // Tool use.
+  "When the user asks about anything current, local, or uncertain, search",
+  "rather than guessing, and say a short acknowledgement before you do.",
+  // Spoken-output constraints.
+  "Never read more than three results aloud; say how many there were and offer",
+  "to narrow it down. If the search finds nothing, say so plainly. Never invent",
+  "a fact you have not just read from a result.",
 ].join(" ");
 
 /**
@@ -83,6 +96,10 @@ export function buildSessionConfig(): ClientEvent {
           voice: "default",
         },
       },
+      // PART 4: the tools the model may call. Plain JSON Schema — there is no
+      // "executor" field, because running them is entirely the client's job.
+      tools: TOOL_DEFINITIONS,
+      tool_choice: "auto",
     },
   };
 }

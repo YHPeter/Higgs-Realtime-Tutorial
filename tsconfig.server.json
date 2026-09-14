@@ -12,5 +12,11 @@
   },
   // The probe shares the app's session config and event helpers, so those two
   // files are compiled as part of this project too.
-  "include": ["server", "tools", "src/realtime/events.ts", "src/realtime/sessionConfig.ts"]
+  "include": [
+    "server",
+    "tools",
+    "src/realtime/events.ts",
+    "src/realtime/sessionConfig.ts",
+    "src/tools/**/*.ts"
+  ]
 }
