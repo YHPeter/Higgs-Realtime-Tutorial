@@ -11,7 +11,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "probe": "tsx tools/probe.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
