@@ -96,7 +96,7 @@ event. You did not write any of it.
 
 ## The agent, line by line
 
-Everything is in [`pipecat/bot.py`](../pipecat/bot.py). There are three pieces.
+Everything is in [`pipecat/bot.py`](../pipecat/bot.py). There are four pieces.
 
 ### 1. The service: Higgs Realtime in one object
 
@@ -162,37 +162,92 @@ browser is playing audio. Speak at "connected" and the caller hears the greeting
 first word cut off. RTVI — the small message protocol the playground speaks over the WebRTC
 data channel — sends `client-ready` once the client is listening.
 
+### 4. Tools: web search and the time
+
+```python
+async def web_search(params: FunctionCallParams, query: str, topic: str | None = None) -> None:
+    """Search the web. Call this whenever the caller asks about anything current or local
+    (news, weather, sport results, opening hours) or anything you are not sure of.
+
+    Args:
+        query: What the caller is looking for, in their own words.
+        topic: Optional filter: news, weather, sports, science or travel.
+    """
+    await params.result_callback(await tools.web_search(query, topic))
+
+
+TOOLS = [web_search, get_current_time]
+```
+
+This is the tool calling of Part 4, with Pipecat doing the bookkeeping. The function's type
+hints and docstring become the schema the model sees. Pass the same list to
+`BosonRealtimeLLMService(tools=TOOLS)`, which advertises the tools in the session, and to
+`LLMContext(tools=TOOLS)`, which keeps them with the conversation. When the model calls
+one, Pipecat runs the function **in this process**, hands the result back, and the model
+answers out loud.
+
+Because it runs in your process, a tool can do anything your server can: query your
+database, call your own APIs, look up the caller's account. The two here live in
+[`pipecat/tools.py`](../pipecat/tools.py):
+
+- **`web_search`** searches the same ten fictional pages as Part 4
+  (`src/tools/searchIndex.json`). Nothing on the real internet knows who won the Willow
+  Creek regional final, so a correct answer proves the tool ran. Set `PARALLEL_API_KEY` in
+  `.env` and it searches the real web with [Parallel](https://parallel.ai/) instead.
+- **`get_current_time`** answers "what time is it in Tokyo?" from this machine's clock.
+
+The instructions tell Willow to search rather than guess. Part 4's advice on shaping
+results for a voice — a short spoken summary, a count, the closest few results — is what
+`tools.py` returns.
+
+> **⚠ This will bite you: the playground does not show tool calls by default.**
+> Pipecat sends tool names and arguments to clients only if you opt in, with
+> `RTVIObserverParams(function_call_report_level=...)`. `bot.py` logs every search
+> instead; watch its terminal.
+
 ---
 
 ## Acceptance check
 
 `probe.py` makes the same call the playground makes, without a browser or a microphone. It
-calls `POST /start` the way the Connect button does, sets up WebRTC, says it is ready, and
-waits for the greeting:
+calls `POST /start` the way the Connect button does, sets up WebRTC, says it is ready, waits
+for the greeting, and then types a question, as the playground's text box does:
 
 ```bash
 # terminal 1
 uv run bot.py
 
 # terminal 2
-uv run probe.py
+uv run probe.py --say "Who won the Willow Creek regional final?"
 ```
 
 It should print something like this (run on 2026-10-15):
 
 ```
-  5.21s WebRTC connected; waiting for the greeting
-  5.57s bot-ready
-  6.44s bot-started-speaking
-  9.24s bot said: Hi there, how can I help you today?
+  5.14s WebRTC connected; waiting for the greeting
+  5.54s bot-ready
+  6.54s bot-started-speaking
+  9.10s bot said: Hello, how can I help you today?
+ 10.10s typing: 'Who won the Willow Creek regional final?'
+ 10.45s tool call
+ 11.04s bot-started-speaking
+ 19.40s bot said: The Willow Creek Otters won the regional final, beating Eastport 3 to 2 on a stoppage-time goal by Ada Okafor.
 ```
 
-If the bot greets you, your key, the model and the WebRTC path all work. If nothing
-happens after `bot-ready`, look in `bot.py`'s terminal for an authentication or model error.
+and `bot.py`'s terminal shows the search it ran:
+
+```
+web_search('Willow Creek regional final winner', topic='sports')
+```
+
+If the bot greets you, your key, the model and the WebRTC path all work. If it then names
+the Otters and Ada Okafor, the tool ran: that answer exists only in the fictional index. If
+nothing happens after `bot-ready`, look in `bot.py`'s terminal for an authentication or
+model error. Leave out `--say` to check only the greeting.
 
 Then open the playground and have a real conversation, preferably with headphones on. Ask
-it something, interrupt a long answer, and check that the Conversation pane shows both
-sides.
+it what's on in Willow Creek this weekend, interrupt a long answer, type a question into the
+text box, and check that the Conversation pane shows both sides.
 
 ---
 
@@ -204,11 +259,8 @@ sides.
 | The personality | `INSTRUCTIONS` in `bot.py`. Part 5's advice on structuring prompts applies unchanged |
 | Captions | `BOSON_CAPTION_MODEL=` (empty) turns them off |
 | The endpoint | `BOSON_REALTIME_URL`, for example an on-premises deployment's `ws://…/v1/realtime` |
-
-Tools work the same way as in Part 4: write an async Python function, then pass it to
-`BosonRealtimeLLMService(tools=[...])` and to the `LLMContext`. The
-[pipecat-boson README](https://github.com/boson-ai/pipecat-boson#call-python-functions)
-has a complete example.
+| Real web search | `PARALLEL_API_KEY` in `.env` |
+| More tools | Add a function to `TOOLS` in `bot.py` |
 
 [Part 7](part-7.md) builds the same agent with LiveKit Agents. If your product already
 runs on LiveKit, that is the one to follow.

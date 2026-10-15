@@ -519,6 +519,7 @@ name = "higgs-livekit-tutorial"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "livekit-agents" },
     { name = "livekit-plugins-boson" },
     { name = "livekit-plugins-openai" },
@@ -527,6 +528,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp" },
     { name = "livekit-agents", git = "https://github.com/helin-mktech/agents?subdirectory=livekit-agents&rev=1e32b31795066f45c81b634e642c97ef22ba5937" },
     { name = "livekit-plugins-boson", git = "https://github.com/helin-mktech/agents?subdirectory=livekit-plugins%2Flivekit-plugins-boson&rev=1e32b31795066f45c81b634e642c97ef22ba5937" },
     { name = "livekit-plugins-openai", git = "https://github.com/helin-mktech/agents?subdirectory=livekit-plugins%2Flivekit-plugins-openai&rev=1e32b31795066f45c81b634e642c97ef22ba5937" },

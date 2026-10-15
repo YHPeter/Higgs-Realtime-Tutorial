@@ -22,16 +22,47 @@ from pipecat.processors.aggregators.llm_response_universal import LLMContextAggr
 from pipecat.processors.frameworks.rtvi import RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 from pipecat_boson.realtime import BosonRealtimeLLMService
+
+import tools
 
 load_dotenv(override=True)
 
 INSTRUCTIONS = """\
 You are Willow, a friendly voice assistant. Keep every answer to one or two short
 spoken sentences. Never use lists, markdown or emoji: everything you write is read
-aloud. Greet the caller in one sentence when the call starts."""
+aloud. Greet the caller in one sentence when the call starts. When the caller asks about
+anything current or local, use web_search instead of guessing."""
+
+
+# Tools. The model decides to call one; Pipecat runs the function here, in this
+# process, and sends the result back to the model, which then answers out loud.
+# The docstring and type hints become the schema the model sees.
+async def web_search(params: FunctionCallParams, query: str, topic: str | None = None) -> None:
+    """Search the web. Call this whenever the caller asks about anything current or local
+    (news, weather, sport results, opening hours) or anything you are not sure of.
+
+    Args:
+        query: What the caller is looking for, in their own words.
+        topic: Optional filter: news, weather, sports, science or travel.
+    """
+    logger.info(f"web_search({query!r}, topic={topic!r})")
+    await params.result_callback(await tools.web_search(query, topic))
+
+
+async def get_current_time(params: FunctionCallParams, timezone: str | None = None) -> None:
+    """Get the current date and time.
+
+    Args:
+        timezone: Optional IANA time zone, for example Europe/Paris. Omit it for the server's time.
+    """
+    await params.result_callback(tools.current_time(timezone))
+
+
+TOOLS = [web_search, get_current_time]
 
 
 def make_llm() -> BosonRealtimeLLMService:
@@ -41,6 +72,7 @@ def make_llm() -> BosonRealtimeLLMService:
         model=os.getenv("BOSON_REALTIME_MODEL", "higgs-realtime"),
         voice=os.getenv("BOSON_VOICE", "default"),
         instructions=INSTRUCTIONS,
+        tools=TOOLS,
         # Optional: captions of what the caller said, for the playground. The model
         # hears the caller's audio directly and does not need them.
         input_audio_transcription_model=os.getenv("BOSON_CAPTION_MODEL", "higgs-stt-3.1"),
@@ -57,7 +89,7 @@ async def bot(runner_args: RunnerArguments):
     llm = make_llm()
     # realtime_service_mode: the server decides when a turn starts and ends
     # (server VAD), so the aggregators follow its events instead of a local VAD.
-    user_turns, bot_turns = LLMContextAggregatorPair(LLMContext(), realtime_service_mode=True)
+    user_turns, bot_turns = LLMContextAggregatorPair(LLMContext(tools=TOOLS), realtime_service_mode=True)
 
     pipeline = Pipeline(
         [

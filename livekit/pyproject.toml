@@ -7,6 +7,7 @@ dependencies = [
     "livekit-plugins-openai",
     "livekit-plugins-boson",
     "python-dotenv",
+    "aiohttp",
 ]
 
 [tool.uv]

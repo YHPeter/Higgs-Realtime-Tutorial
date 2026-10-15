@@ -33,8 +33,9 @@ to talk to it, and neither depends on Parts 1–5. The agents need Python and
 | [6](docs/part-6.md) | [Pipecat](https://docs.pipecat.ai/) | `cd pipecat && uv run bot.py` | the Pipecat playground at `http://localhost:7860` |
 | [7](docs/part-7.md) | [LiveKit Agents](https://docs.livekit.io/agents/) | `livekit-server --dev`, then `cd livekit && uv run agent.py dev` | the LiveKit Agents Playground at `http://localhost:3000` |
 
-Each folder has a `.env.example` to copy to `.env` with your key, and a `probe.py` that
-places a call headlessly as the acceptance check.
+Both agents call tools, a web search and the time, which run in your own process. Each
+folder has a `.env.example` to copy to `.env` with your key, and a `probe.py` that places a
+call headlessly and asks a question the agent can only answer with its search tool.
 
 ## Checkpoints
 

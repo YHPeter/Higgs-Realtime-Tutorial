@@ -795,7 +795,7 @@ dependencies = [
 requires-dist = [
     { name = "aiohttp" },
     { name = "pipecat-ai", extras = ["runner", "webrtc"], specifier = "==1.12.0" },
-    { name = "pipecat-boson", git = "https://github.com/YHPeter/pipecat-boson?rev=8cb97574d4e0a89764f9a939a45aeefeb81fa6d9" },
+    { name = "pipecat-boson", git = "https://github.com/YHPeter/pipecat-boson?rev=b5eddafddbe77599f68298ebbd549ada62c6614f" },
     { name = "python-dotenv" },
 ]
 
@@ -1673,7 +1673,7 @@ wheels = [
 [[package]]
 name = "pipecat-boson"
 version = "0.1.3"
-source = { git = "https://github.com/YHPeter/pipecat-boson?rev=8cb97574d4e0a89764f9a939a45aeefeb81fa6d9#8cb97574d4e0a89764f9a939a45aeefeb81fa6d9" }
+source = { git = "https://github.com/YHPeter/pipecat-boson?rev=b5eddafddbe77599f68298ebbd549ada62c6614f#b5eddafddbe77599f68298ebbd549ada62c6614f" }
 dependencies = [
     { name = "loguru" },
     { name = "pipecat-ai" },

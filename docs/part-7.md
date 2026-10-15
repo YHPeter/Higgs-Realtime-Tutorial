@@ -74,6 +74,7 @@ Compare it with Part 6's `bot.py`. The parts map one to one:
 | Higgs Realtime | `BosonRealtimeLLMService` | `boson.realtime.RealtimeModel` |
 | Wiring | a `Pipeline` you assemble | `AgentSession` assembles it |
 | Speaking first | `LLMRunFrame` on `client-ready` | `generate_reply()` in `on_enter` |
+| Tools | functions in `TOOLS`, given to the service and the context | `@function_tool` methods on the `Agent` |
 | Turn detection | the server's, via `realtime_service_mode=True` | the server's, by default |
 | Who it talks to | one browser, peer to peer | a LiveKit room |
 
@@ -82,6 +83,34 @@ hears, thinks and speaks, the same way `BosonRealtimeLLMService` does in Part 6.
 
 `input_audio_transcription_model` only produces captions of what the caller said, which
 the playground shows in its chat. The model hears the audio itself and does not need it.
+
+### Tools: web search and the time
+
+```python
+class Willow(Agent):
+    ...
+
+    @function_tool
+    async def web_search(self, context: RunContext, query: str, topic: str | None = None) -> dict:
+        """Search the web. Call this whenever the caller asks about anything current or local
+        (news, weather, sport results, opening hours) or anything you are not sure of.
+
+        Args:
+            query: What the caller is looking for, in their own words.
+            topic: Optional filter: news, weather, sports, science or travel.
+        """
+        return await tools.web_search(query, topic)
+```
+
+A method decorated with `@function_tool` is a tool. LiveKit reads its type hints and
+docstring as the schema, runs it **in this worker** when the model calls it, and sends the
+return value back; the model then answers out loud. Because it runs in your process, a
+tool can do anything your server can: query your database, call your own APIs.
+
+The tools are the same as Part 6's, from the same [`tools.py`](../livekit/tools.py):
+`web_search` searches the ten fictional pages of Part 4 (`src/tools/searchIndex.json`), or
+the real web with [Parallel](https://parallel.ai/) when `PARALLEL_API_KEY` is set, and
+`get_current_time` reads the clock. The worker logs every search.
 
 ---
 
@@ -156,20 +185,30 @@ in the tutorial's `livekit/` folder (the playground can stay open or be stopped)
 
 ```bash
 cd livekit
-uv run probe.py --say "What is the capital of France? One sentence."
+uv run probe.py --say "Who won the Willow Creek regional final?"
 ```
 
 Expected output (run on 2026-10-15):
 
 ```
-  1.16s joined room probe-41905363; waiting for the agent
-  5.66s agent speaking
-  8.24s agent said: Hello, how can I help you today?
-  8.26s agent listening
-  9.24s typing: 'What is the capital of France? One sentence.'
-  9.59s agent speaking
- 11.81s agent said: The capital of France is Paris.
+  1.44s joined room probe-aceaa942; waiting for the agent
+  4.59s agent speaking
+  6.92s agent said: Hello, how can I help you today?
+  6.92s agent listening
+  7.92s typing: 'Who won the Willow Creek regional final?'
+  8.32s agent thinking
+  8.88s agent speaking
+ 16.69s agent said: The Willow Creek Otters won the regional final, beating Eastport 3 to 2 on a stoppage-time goal by Ada Okafor.
 ```
+
+and the worker logs the search it ran:
+
+```
+web_search('Willow Creek regional final winner', topic='sports')
+```
+
+Naming the Otters and Ada Okafor proves the tool ran: that answer exists only in the
+fictional index.
 
 The `agent speaking` / `agent listening` lines come from the `lk.agent.state` attribute
 that every LiveKit agent publishes. The agent's words come from LiveKit's
@@ -185,9 +224,7 @@ client can use all three. Then talk to it in the playground, which tests the spo
 
 ## Where to go from here
 
-- **Tools.** Decorate a method of `Willow` with `@function_tool`, as in the plugin's
-  [example agent](https://github.com/helin-mktech/agents/blob/1e32b31795066f45c81b634e642c97ef22ba5937/livekit-plugins/livekit-plugins-boson/examples/agent.py).
-  The model calls it and speaks the result.
+- **More tools.** Add another `@function_tool` method to `Willow`.
 - **Deploy.** The worker is an ordinary process: run it next to your LiveKit server, or
   against LiveKit Cloud. Your backend signs room tokens for your users, as
   `probe.py`'s `user_token()` does.
